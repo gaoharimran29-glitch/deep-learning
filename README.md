@@ -327,6 +327,139 @@ cnn.save('dog-vs-cat-classifier5.h5')
 print("File saved")
 ```
 
+```python
+import tensorflow as tf
+import numpy as np
+import os
+from sklearn.utils.class_weight import compute_class_weight
+from tensorflow.keras.models import Sequential, load_model
+from tensorflow.keras.layers import (
+    Conv2D, MaxPooling2D, Dense, Dropout,
+    Flatten, BatchNormalization
+)
+from tensorflow.keras.layers import GlobalAveragePooling2D
+from tensorflow.keras.preprocessing.image import ImageDataGenerator, load_img, img_to_array
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+
+# =========================
+# CONFIGURATION
+# =========================
+IMG_SIZE = (160, 160)
+BATCH_SIZE = 32
+EPOCHS = 20
+MODEL_PATH = "plant_disease_model.keras"
+
+# =========================
+# DATA GENERATORS
+# =========================
+datagen = ImageDataGenerator(
+    rescale=1./255,
+    validation_split=0.2,
+    rotation_range=20,
+    zoom_range=0.2,
+    width_shift_range=0.1,
+    height_shift_range=0.1,
+    horizontal_flip=True
+)
+
+train_gen = datagen.flow_from_directory(
+    r"/content/data/plant-data/Image Data base/Image Data base",
+    target_size=IMG_SIZE,
+    batch_size=BATCH_SIZE,
+    class_mode="categorical",
+    subset="training",
+    shuffle=True
+)
+
+val_gen = datagen.flow_from_directory(
+    r"/content/data/plant-data/Image Data base/Image Data base",
+    target_size=IMG_SIZE,
+    batch_size=BATCH_SIZE,
+    class_mode="categorical",
+    subset="validation",
+    shuffle=False
+)
+
+NUM_CLASSES = train_gen.num_classes
+CLASS_NAMES = list(train_gen.class_indices.keys())
+
+print("Classes:", CLASS_NAMES)
+
+# =========================
+# MODEL DEFINITION
+# =========================
+model = Sequential([
+    Conv2D(32, (3,3), activation="relu", input_shape=(224,224,3)),
+    BatchNormalization(),
+    MaxPooling2D(2,2),
+
+    Conv2D(64, (3,3), activation="relu"),
+    BatchNormalization(),
+    MaxPooling2D(2,2),
+
+    Conv2D(128, (3,3), activation="relu"),
+    BatchNormalization(),
+    MaxPooling2D(2,2),
+
+    GlobalAveragePooling2D(),
+    Dense(256, activation="relu"),
+    Dropout(0.5),
+
+    Dense(NUM_CLASSES, activation="softmax")
+])
+
+model.compile(
+    optimizer="adam",
+    loss="categorical_crossentropy",
+    metrics=["accuracy"]
+)
+
+model.summary()
+
+# =========================
+# CALLBACKS
+# =========================
+early_stop = EarlyStopping(
+    monitor="val_loss",
+    patience=5,
+    restore_best_weights=True
+)
+
+checkpoint = ModelCheckpoint(
+    MODEL_PATH,
+    monitor="val_accuracy",
+    save_best_only=True
+)
+
+labels = train_gen.classes
+class_weights_list = compute_class_weight(
+    class_weight="balanced",
+    classes=np.unique(labels),
+    y=labels
+)
+
+class_weights = dict(enumerate(class_weights_list))
+print("Class weights:", class_weights)
+for k in class_weights:
+    class_weights[k] = min(class_weights[k], 20.0)
+# =========================
+# TRAIN MODEL
+# =========================
+history = model.fit(
+    train_gen,
+    validation_data=val_gen,
+    epochs=EPOCHS,
+    class_weight=class_weights,
+    callbacks=[early_stop, checkpoint]
+)
+
+# =========================
+# SAVE FINAL MODEL
+# =========================
+model.save('Plant_disease.keras')
+print("Model saved")
+```
+
 # NLP 
 ```python
 # Import NLTK library for Natural Language Processing
