@@ -177,6 +177,122 @@ rnn.save('basic-rnn-model.h5')
 ```
 
 # CNN used for images
+
+```python
+import tensorflow as tf
+from tensorflow.keras import layers, models, mixed_precision
+import os
+
+# 1. ACTIVATE MIXED PRECISION (Boosts GPU speed significantly)
+policy = mixed_precision.Policy('mixed_float16')
+mixed_precision.set_global_policy(policy)
+
+# -------------------------------
+# PARAMETERS
+# -------------------------------
+IMG_SIZE = 224
+BATCH_SIZE = 16  # Increased from 16 for better GPU utilization
+NUM_CLASSES = 7
+train_dir = "/root/.cache/kagglehub/datasets/fahadullaha/facial-emotion-recognition-dataset/versions/1/processed_data"
+
+# -------------------------------
+# CLASS WEIGHTS (NO RAM OVERLOAD)
+# -------------------------------
+class_names = sorted([d for d in os.listdir(train_dir) if os.path.isdir(os.path.join(train_dir, d))])
+class_counts = {c: len(os.listdir(os.path.join(train_dir, c))) for c in class_names}
+
+total_samples = sum(class_counts.values())
+class_weights = {i: total_samples / (NUM_CLASSES * count) for i, count in enumerate(class_counts.values())}
+print("Class counts:", class_counts)
+print("Class weights:", class_weights)
+
+# -------------------------------
+# DATA PIPELINE (The "Fast" Way)
+# -------------------------------
+# This replaces ImageDataGenerator
+train_ds = tf.keras.utils.image_dataset_from_directory(
+    train_dir,
+    validation_split=0.2,
+    subset="training",
+    seed=42,
+    image_size=(IMG_SIZE, IMG_SIZE),
+    batch_size=BATCH_SIZE,
+    label_mode='categorical' 
+)
+
+val_ds = tf.keras.utils.image_dataset_from_directory(
+    train_dir,
+    validation_split=0.2,
+    subset="validation",
+    seed=42,
+    image_size=(IMG_SIZE, IMG_SIZE),
+    batch_size=BATCH_SIZE,
+    label_mode='categorical'
+)
+
+# Optimization: Cache and Prefetch
+AUTOTUNE = tf.data.AUTOTUNE
+train_ds = train_ds.shuffle(100).prefetch(buffer_size=AUTOTUNE)
+val_ds = val_ds.cache().prefetch(buffer_size=AUTOTUNE)
+
+# -------------------------------
+# DATA AUGMENTATION (Built into the model)
+# -------------------------------
+data_augmentation = tf.keras.Sequential([
+    layers.RandomFlip("horizontal"),
+    layers.RandomRotation(0.1),
+    layers.RandomZoom(0.1),
+])
+
+# -------------------------------
+# MODEL
+# -------------------------------
+base_model = tf.keras.applications.MobileNetV2(
+    weights='imagenet', 
+    include_top=False, 
+    input_shape=(IMG_SIZE, IMG_SIZE, 3)
+)
+base_model.trainable = False
+
+inputs = layers.Input(shape=(IMG_SIZE, IMG_SIZE, 3))
+x = data_augmentation(inputs)
+x = tf.keras.applications.mobilenet_v2.preprocess_input(x)
+x = base_model(x, training=False)
+x = layers.GlobalAveragePooling2D()(x)
+x = layers.Dense(128, activation='relu')(x)
+x = layers.Dropout(0.3)(x)
+
+# Important: Use float32 for the final softmax when using Mixed Precision
+outputs = layers.Dense(NUM_CLASSES, activation='softmax', dtype='float32')(x)
+
+model = models.Model(inputs, outputs)
+
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(1e-4),
+    loss='categorical_crossentropy',
+    metrics=['accuracy', tf.keras.metrics.Precision(name='precision'), tf.keras.metrics.Recall(name='recall')]
+)
+
+# -------------------------------
+# TRAIN
+# -------------------------------
+
+earlystopping = tf.keras.callbacks.EarlyStopping(
+    monitor='val_loss', 
+    patience=4, 
+    restore_best_weights=True
+)
+
+model.fit(
+    train_ds,
+    validation_data=val_ds,
+    epochs=30,
+    callbacks=[earlystopping],
+    class_weight=class_weights
+)
+
+model.save('emotional_mobilenet_v2.keras')
+```
 ```python
 # Import TensorFlow for building and training deep learning models
 import tensorflow as tf
